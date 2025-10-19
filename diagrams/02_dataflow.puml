@@ -1,0 +1,23 @@
+@startuml
+title Custody Connect - Event Lifecycle (Sequence)
+
+actor Custodian as C
+participant "API Layer" as API
+participant "Reconciliation Service" as S
+database DB
+actor "Internal User" as U
+
+C -> API : POST /api/events {payload}
+API -> API : Validate & timestamp
+API -> S : Persist event (status=pending)
+S -> DB : INSERT events
+S -> S : Compare with internal data\n(mocked in prototype)
+S -> DB : UPDATE events (status=match|mismatch)\nINSERT audit_logs
+
+U -> API : GET /api/audit?filters
+API -> DB : SELECT audit trail
+DB --> API : rows
+API --> U : JSON / CSV / UI
+
+@enduml
+

@@ -1,0 +1,24 @@
+@startuml
+title Custody Connect - Error Handling Path
+
+actor Custodian as C
+participant API
+participant Validation as V
+participant Recon as R
+database DB
+
+C -> API : POST /api/events {payload}
+API -> V : Validate schema/fields
+V --> API : INVALID (missing fields)
+API -> DB : INSERT audit_logs(action="VALIDATION_FAIL")
+API --> C : 400 Bad Request {errors[]}
+
+== Alternative ==
+C -> API : POST /api/events {payload}
+API -> V : Validate -> OK
+API -> R : Persist + reconcile
+R -> DB : INSERT events; INSERT audit_logs(action="RECEIVED")
+R -> DB : UPDATE events(status=mismatch)\nINSERT audit_logs(action="RECON_MISMATCH")
+API --> C : 202 Accepted
+
+@enduml

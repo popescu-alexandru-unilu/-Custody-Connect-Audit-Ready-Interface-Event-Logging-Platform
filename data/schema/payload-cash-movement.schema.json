@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "payload-cash-movement.schema.json",
+  "title": "CashMovementPayload",
+  "type": "object",
+  "required": ["currency","amount","valueDate","accountId"],
+  "properties": {
+    "match": { "type": "boolean" },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "amount": { "type": "number" },
+    "valueDate": { "type": "string", "format": "date" },
+    "accountId": { "type": "string" },
+    "reference": { "type": "string" }
+  },
+  "additionalProperties": true
+}

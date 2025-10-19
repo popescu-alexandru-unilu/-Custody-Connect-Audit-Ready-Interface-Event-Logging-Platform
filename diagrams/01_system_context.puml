@@ -1,0 +1,28 @@
+@startuml CustodyConnectSystemContext
+title Custody Connect - System Context
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+actor "Internal Users\n(IT, Compliance, Ops)" as Users
+rectangle "External Custodian / Fund Admin\n(Upstream Systems)" as Custodian
+
+node "Custody Connect" as CC {
+  [API Layer\n(JAX-RS)] as API
+  [Reconciliation Service] as Recon
+  [Audit Trail Service] as Audit
+  database "Database\n(events, audit_logs)" as DB
+  [Monitoring / Dashboard] as UI
+
+  API --> Recon
+  API --> Audit
+  Recon --> DB
+  Audit --> DB
+  UI --> DB
+}
+
+Custodian --> API : JSON/XML Events (HTTPS)
+Users --> UI : View status & logs
+Users --> API : Audit/Reporting (GET)
+
+@enduml

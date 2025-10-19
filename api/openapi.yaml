@@ -1,0 +1,373 @@
+openapi: 3.0.0
+info:
+  title: Custody Connect API
+  version: 1.0.0
+  description: Audit-ready interface for event logging in custody connect system
+
+servers:
+  - url: http://localhost:8080/custody-connect/api/v1
+    description: Local development server
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        200:
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "UP"
+        500:
+          description: Service unhealthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "DOWN"
+                  error:
+                    type: string
+                  message:
+                    type: string
+
+  /events:
+    get:
+      summary: Get events with pagination and filtering
+      operationId: getEvents
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 100
+        - name: q
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: ["processed", "pending", "failed"]
+        - name: type
+          in: query
+          schema:
+            type: string
+        - name: sort
+          in: query
+          schema:
+            type: string
+            default: "eventTimestamp"
+        - name: dir
+          in: query
+          schema:
+            type: string
+            enum: ["asc", "desc"]
+            default: "desc"
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        200:
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  size:
+                    type: integer
+                  totalPages:
+                    type: integer
+        400:
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+        500:
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  message:
+                    type: string
+
+    post:
+      summary: Log event
+      operationId: logEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                eventType:
+                  type: string
+                payload:
+                  type: object
+      responses:
+        202:
+          description: Event accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  message:
+                    type: string
+                    example: "Event accepted for processing"
+        400:
+          description: Bad request
+        500:
+          description: Internal server error
+
+  /events/count:
+    get:
+      summary: Count events with optional filtering
+      operationId: getEventCount
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: ["processed", "pending", "failed"]
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        200:
+          description: Count retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+        400:
+          description: Bad request
+        500:
+          description: Internal server error
+
+  /events/{id}/evidence:
+    get:
+      summary: Download event evidence ZIP
+      operationId: getEventEvidence
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        200:
+          description: Evidence ZIP file
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        404:
+          description: Event not found
+        500:
+          description: Internal server error
+
+  /audit:
+    get:
+      summary: Get audit logs
+      operationId: getAuditLogs
+      parameters:
+        - name: max
+          in: query
+          schema:
+            type: integer
+            default: 10
+            minimum: 1
+            maximum: 1000
+      responses:
+        200:
+          description: Audit logs retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+        400:
+          description: Bad request
+        500:
+          description: Internal server error
+
+  /audit/count:
+    get:
+      summary: Get audit log count
+      operationId: getAuditLogCount
+      responses:
+        200:
+          description: Count retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+        500:
+          description: Internal server error
+
+  /admin/dlq/messages:
+    get:
+      summary: Get DLQ messages
+      operationId: getDlqMessages
+      responses:
+        200:
+          description: DLQ messages retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      type: object
+                  count:
+                    type: integer
+        500:
+          description: Internal server error
+
+  /admin/dlq/{id}/reprocess:
+    post:
+      summary: Reprocess DLQ message
+      operationId: reprocessDlqMessage
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        200:
+          description: Message reprocessed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        400:
+          description: Reprocessing failed
+        500:
+          description: Internal server error
+
+  /admin/dlq/{id}:
+    delete:
+      summary: Delete DLQ message
+      operationId: deleteDlqMessage
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+            format: int64
+      responses:
+        200:
+          description: Message deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+        404:
+          description: Message not found
+        500:
+          description: Internal server error
+
+  /admin/retention/run:
+    post:
+      summary: Run retention job
+      operationId: runRetention
+      responses:
+        200:
+          description: Retention completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  eventsDeleted:
+                    type: integer
+                  auditLogsDeleted:
+                    type: integer
+                  reconResultsDeleted:
+                    type: integer
+                  cutoffDate:
+                    type: string
+                  message:
+                    type: string
+        500:
+          description: Retention failed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  message:
+                    type: string

@@ -1,0 +1,25 @@
+@startuml
+title Custody Connect - Deployment (Local/Test)
+
+node "Developer Workstation" as Dev {
+  component "IDE/Maven" as IDE
+}
+
+node "App Server\n(Payara/WildFly/Quarkus)" as App {
+  component "Custody Connect\nJAX-RS App" as AppSvc
+  component "Swagger UI" as Swagger
+  artifact "Logs\n(Logback)" as Logs
+}
+
+database "PostgreSQL / H2" as DB
+actor "Browser / Postman" as Client
+cloud "External Custodian\n(Mock/Stub)" as Custodian
+
+IDE --> AppSvc : build/deploy (WAR/JAR)
+AppSvc --> DB : JDBC
+AppSvc --> Logs
+Client --> AppSvc : HTTPS
+Client --> Swagger : docs
+Custodian --> AppSvc : HTTPS (Events)
+
+@enduml

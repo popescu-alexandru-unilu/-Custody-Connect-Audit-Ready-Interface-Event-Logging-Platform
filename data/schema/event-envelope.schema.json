@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "event-envelope.schema.json",
+  "title": "EventEnvelope",
+  "type": "object",
+  "required": ["type", "sourceSystem"],
+  "properties": {
+    "type": { "type": "string", "minLength": 1, "examples": ["TRADE_SETTLED","CASH_MOVEMENT","CORP_ACTION"] },
+    "sourceSystem": { "type": "string", "minLength": 1, "examples": ["CUST_A","FUND_ADMIN_X"] },
+    "payload": { "type": "string", "description": "raw JSON/XML string from upstream system" }
+  },
+  "additionalProperties": false
+}

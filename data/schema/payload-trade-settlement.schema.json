@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "payload-trade-settlement.schema.json",
+  "title": "TradeSettlementPayload",
+  "type": "object",
+  "required": ["isin","quantity","tradeDate","settlementDate","accountId","currency","cashAmount"],
+  "properties": {
+    "match": { "type": "boolean" },
+    "isin": { "type": "string", "pattern": "^[A-Z0-9]{12}$", "examples": ["DE0001234567"] },
+    "quantity": { "type": "number", "minimum": 0 },
+    "tradeDate": { "type": "string", "format": "date" },
+    "settlementDate": { "type": "string", "format": "date" },
+    "accountId": { "type": "string" },
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "cashAmount": { "type": "number" }
+  },
+  "additionalProperties": true
+}

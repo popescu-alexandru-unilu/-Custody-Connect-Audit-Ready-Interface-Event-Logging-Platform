@@ -1,0 +1,34 @@
+# WildFly CLI commands to configure persistent H2 database
+# This fixes the issue where in-memory H2 databases get wiped on restart, causing "table not found" 500 errors
+
+# Run these commands in jboss-cli.sh:
+# ./bin/jboss-cli.sh --connect --file=wildfly-datasource-config.cli
+
+# Stop the server for configuration (optional, can do while running)
+/subsystem=datasources/data-source=ExampleDS:disable()
+
+# Remove the existing ExampleDS (uses in-memory H2)
+/subsystem=datasources/data-source=ExampleDS:remove()
+
+# Add persistent H2 datasource (file-based, survives restarts)
+/subsystem=datasources/data-source=ExampleDS:add( \
+    jndi-name="java:jboss/datasources/ExampleDS", \
+    pool-name="ExampleDSPool", \
+    enabled=false, \
+    connection-url="jdbc:h2:file:./standalone/data/custody-connect.db;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE", \
+    driver-name="h2", \
+    user-name="sa", \
+    password="sa", \
+    jta=true, \
+    statistics-enabled=true)
+
+# Enable the datasource
+/subsystem=datasources/data-source=ExampleDS:enable()
+
+# Test the connection
+/subsystem=datasources/data-source=ExampleDS:test-connection-in-pool()
+
+# After restarting WildFly, your 500 errors should disappear because:
+# 1. Database persists across restarts
+# 2. Flyway migrations run once and stay applied
+# 3. JPA queries find the tables created by Flyway

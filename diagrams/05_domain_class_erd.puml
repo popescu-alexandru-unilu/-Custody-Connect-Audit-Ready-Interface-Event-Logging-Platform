@@ -1,0 +1,39 @@
+@startuml
+title Custody Connect - Domain Model (Class/ERD)
+
+skinparam classAttributeIconSize 0
+
+class Event {
+  +UUID id
+  +String type            // TRADE_SETTLED, CASH_MOVEMENT, etc.
+  +String sourceSystem
+  +Instant eventTimestamp
+  +String status          // pending|match|mismatch|error
+  +String referenceId     // external reference
+  +Text payload           // raw JSON/XML
+  +Instant createdAt
+  +Instant updatedAt
+}
+
+class AuditLog {
+  +UUID id
+  +UUID eventId
+  +String action          // RECEIVED, VALIDATED, RECONCILED
+  +String level           // INFO|WARN|ERROR
+  +String message
+  +Instant loggedAt
+  +Text details
+}
+
+class ReconciliationResult {
+  +UUID id
+  +UUID eventId
+  +Boolean matched
+  +String mismatchReason
+  +Instant evaluatedAt
+}
+
+Event "1" -- "0..*" AuditLog : logs >>
+Event "1" -- "0..1" ReconciliationResult : has >>
+
+@enduml

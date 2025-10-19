@@ -1,0 +1,34 @@
+@startuml
+title Custody Connect - Backend Components
+
+skinparam componentStyle rectangle
+skinparam shadowing false
+
+package "API Layer" {
+  [EventController]
+  [AuditController]
+}
+
+package "Service Layer" {
+  [ReconciliationService]
+  [AuditService]
+  [ValidationService]
+  [MappingUtil]
+}
+
+package "Data Layer (JPA)" {
+  [EventRepository]
+  [AuditRepository]
+}
+
+database "DB" as DB
+[EventController] --> [ReconciliationService]
+[AuditController] --> [AuditService]
+[ReconciliationService] --> [ValidationService]
+[ReconciliationService] --> [MappingUtil]
+[ReconciliationService] --> [EventRepository]
+[AuditService] --> [AuditRepository]
+[EventRepository] --> DB
+[AuditRepository] --> DB
+
+@enduml

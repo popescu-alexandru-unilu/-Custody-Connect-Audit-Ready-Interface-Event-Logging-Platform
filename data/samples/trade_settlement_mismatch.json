@@ -1,0 +1,5 @@
+{
+  "type": "TRADE_SETTLED",
+  "sourceSystem": "CUST_A",
+  "payload": "{\"match\":false,\"isin\":\"DE0001234567\",\"quantity\":950,\"tradeDate\":\"2025-10-01\",\"settlementDate\":\"2025-10-04\",\"accountId\":\"ACC-1001\",\"currency\":\"EUR\",\"cashAmount\":12000.00}"
+}

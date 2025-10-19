@@ -1,0 +1,5 @@
+{
+  "type": "CASH_MOVEMENT",
+  "sourceSystem": "FUND_ADMIN_X",
+  "payload": "{\"match\":true,\"currency\":\"EUR\",\"amount\":-2500.50,\"valueDate\":\"2025-10-05\",\"accountId\":\"ACC-2002\",\"reference\":\"RED-8765\"}"
+}

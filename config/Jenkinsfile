@@ -1,0 +1,49 @@
+pipeline {
+    agent any
+
+    tools {
+        maven 'Maven 3.6'
+        jdk 'JDK 11'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: 'main', url: 'https://github.com/popescu-alexandru-unilu/-Custody-Connect-Audit-Ready-Interface-Event-Logging-Platform.git'
+            }
+        }
+
+        stage('Build') {
+            steps {
+                sh 'mvn clean compile -DskipTests'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh 'mvn test'
+                jacoco classPattern: 'target/classes', execPattern: 'target/jacoco.exec', sourcePattern: 'src/main/java', exclusionPattern: 'src/test/*'
+            }
+        }
+
+        stage('Package') {
+            steps {
+                sh 'mvn package -DskipTests'
+            }
+        }
+
+        stage('Security Scan') {
+            steps {
+                // Add security scanning tool like OWASP Dependency Check
+                sh 'echo Security scan placeholder'
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
+            junit testResults: 'target/surefire-reports/*.xml'
+        }
+    }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "payload-corporate-action.schema.json",
+  "title": "CorporateActionPayload",
+  "type": "object",
+  "required": ["isin","eventType","exDate","recordDate"],
+  "properties": {
+    "match": { "type": "boolean" },
+    "isin": { "type": "string", "pattern": "^[A-Z0-9]{12}$" },
+    "eventType": { "type": "string", "enum": ["DIVIDEND","SPLIT","RIGHTS","MERGER","OTHER"] },
+    "exDate": { "type": "string", "format": "date" },
+    "recordDate": { "type": "string", "format": "date" },
+    "paymentDate": { "type": "string", "format": "date" },
+    "details": { "type": "string" }
+  },
+  "additionalProperties": true
+}

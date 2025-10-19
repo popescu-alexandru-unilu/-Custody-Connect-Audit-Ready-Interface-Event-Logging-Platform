@@ -1,0 +1,1744 @@
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { api, API_BASE } from './api';
+import type { EventModel, AuditLogModel } from './types';
+import { Modal } from './components/Modal';
+import { Drawer } from './components/Drawer';
+import { Toasts, ToastItem } from './components/Toasts';
+import { Popover } from './components/Popover';
+import { BarChart3, Activity, Shield, AlertCircle, TrendingUp, Database, Clock, ChevronRight, Search, Bell, Settings, LogOut, Menu, X, FileText, Download, RefreshCw, LucideIcon, Info, ExternalLink } from 'lucide-react';
+
+// Type definitions
+interface StatCardProps {
+  icon: LucideIcon;
+  title: string;
+  value: number;
+  change: number;
+  color: string;
+  subtitle?: string;
+}
+
+interface EventRowProps { event: EventModel; onOpen: (e: EventModel) => void; onFilter: (f: Partial<EventsFilter>) => void; onCopy: (id: string) => void; }
+interface AuditLogRowProps { log: AuditLogModel; onOpen?: (log: AuditLogModel) => void; }
+
+type RangeKey = 'all' | '1h' | '24h' | '7d';
+interface EventsFilter { q: string; status: '' | 'processed' | 'pending' | 'failed'; type: string; }
+
+const now = () => new Date();
+const toIso = (d: Date) => d.toISOString();
+const relTime = (iso: string) => {
+  const t = new Date(iso).getTime();
+  const diff = Math.max(0, Date.now() - t);
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} hr${h>1?'s':''} ago`;
+  const d = Math.floor(h / 24);
+  return `${d} day${d>1?'s':''} ago`;
+};
+
+const App = () => {
+  // API reachability banner (prevents silent "dead" UI on bad base URL)
+  const [apiUp, setApiUp] = useState<boolean | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try { await api.get('/health'); if (!cancelled) setApiUp(true); }
+      catch { if (!cancelled) setApiUp(false); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  // Routing
+  const [currentPage, setCurrentPage] = useState<'dashboard'|'events'|'audit'|'admin'>(() => {
+    const h = window.location.hash.replace('#/','');
+    if (h === 'events' || h === 'audit' || h === 'admin') return h;
+    return 'dashboard';
+  });
+  const navigate = (page: 'dashboard'|'events'|'audit'|'admin') => { setCurrentPage(page); window.location.hash = `#/${page}`; };
+  useEffect(() => {
+    const onHash = () => {
+      const h = window.location.hash.replace('#/','');
+      if (h === 'events' || h === 'audit' || h === 'admin' || h === 'dashboard') setCurrentPage(h as any);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [range, setRange] = useState<RangeKey>('all');
+  const [refreshTick, setRefreshTick] = useState(0);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [toasts, setToasts] = useState<{ id: string; text: string }[]>([]);
+  const pushToast = (text: string) => setToasts(t => [...t, { id: Math.random().toString(36).slice(2), text }]);
+  const dismissToast = (id: string) => setToasts(t => t.filter(x => x.id !== id));
+
+  // Notifications
+  const bellRef = useRef<HTMLButtonElement | null>(null);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState<AuditLogModel[]>([]);
+  const [unread, setUnread] = useState(false);
+  const markAllRead = () => { localStorage.setItem('cc.notifications.readAt', String(Date.now())); setUnread(false); };
+
+  // Settings
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [settings, setSettings] = useState(() => {
+    const s = localStorage.getItem('cc.settings');
+    return s ? JSON.parse(s) : { theme: 'light', timeZone: 'local', refreshIntervalSec: 0, compact: false };
+  });
+  useEffect(() => { localStorage.setItem('cc.settings', JSON.stringify(settings)); }, [settings]);
+
+  // Dashboard data
+  const [countTotal, setCountTotal] = useState<number | null>(null);
+  const [countProcessed, setCountProcessed] = useState<number | null>(null);
+  const [countFailed, setCountFailed] = useState<number | null>(null);
+  const [recentEvents, setRecentEvents] = useState<EventModel[]>([]);
+  const [auditPreview, setAuditPreview] = useState<AuditLogModel[]>([]);
+  const rangeParams = useMemo(() => {
+    const to = toIso(now());
+    if (range === '1h') return { from: toIso(new Date(Date.now() - 60*60*1000)), to };
+    if (range === '24h') return { from: toIso(new Date(Date.now() - 24*60*60*1000)), to };
+    if (range === '7d') return { from: toIso(new Date(Date.now() - 7*24*60*60*1000)), to };
+    return {} as any;
+  }, [range]);
+  const fetchDashboard = async () => {
+    setIsRefreshing(true);
+    try {
+      const p1 = api.get('/events/count', { params: { ...(rangeParams as any) } });
+      const p2 = api.get('/events/count', { params: { status: 'processed', ...(rangeParams as any) } });
+      const p3 = api.get('/events/count', { params: { status: 'failed', ...(rangeParams as any) } });
+      const p4 = api.get('/events', { params: { page: 0, size: 10, q: searchQuery || undefined, ...(rangeParams as any) } });
+      const p5 = api.get('/audit', { params: { max: 10 } });
+      const [r1, r2, r3, r4, r5] = await Promise.all([p1, p2, p3, p4, p5]);
+      setCountTotal(r1.data.total ?? 0);
+      setCountProcessed(r2.data.total ?? 0);
+      setCountFailed(r3.data.total ?? 0);
+      const items: EventModel[] = (r4.data.items ?? r4.data ?? []) as any;
+      setRecentEvents(items);
+      const audits: AuditLogModel[] = r5.data as any;
+      setAuditPreview(audits);
+      setNotifications(audits);
+      const readAt = Number(localStorage.getItem('cc.notifications.readAt') || 0);
+      const hasUnread = audits.some(a => new Date(a.loggedAt as any).getTime() > readAt);
+      setUnread(hasUnread);
+    } catch (e) {
+      pushToast('Failed to load dashboard data');
+    } finally { setIsRefreshing(false); }
+  };
+  useEffect(() => { fetchDashboard(); /* eslint-disable-next-line */ }, [range, refreshTick]);
+
+  // Optional polling from settings
+  useEffect(() => {
+    if (!settings.refreshIntervalSec || settings.refreshIntervalSec <= 0) return;
+    const id = setInterval(() => setRefreshTick(t => t+1), settings.refreshIntervalSec * 1000);
+    return () => clearInterval(id);
+  }, [settings.refreshIntervalSec]);
+
+  // Global shortcuts
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === '/' && (e.target as HTMLElement)?.tagName !== 'INPUT') {
+        e.preventDefault();
+        const el = document.getElementById('global-search') as HTMLInputElement | null;
+        el?.focus();
+      }
+      if (e.key === 'g') {
+        let handled = false;
+        const onNext = (ev: KeyboardEvent) => {
+          if (handled) return;
+          handled = true;
+          if (ev.key === 'd') navigate('dashboard');
+          if (ev.key === 'e') navigate('events');
+          if (ev.key === 'a') navigate('audit');
+          if (ev.key === 's') navigate('admin');
+          window.removeEventListener('keydown', onNext, true);
+        };
+        window.addEventListener('keydown', onNext, true);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // Selection
+  const [openEvent, setOpenEvent] = useState<EventModel | null>(null);
+  const [openAudit, setOpenAudit] = useState<AuditLogModel | null>(null);
+
+  // Events page state and handlers
+  const [events, setEvents] = useState<EventModel[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsPage, setEventsPage] = useState(0);
+  const [eventsHasMore, setEventsHasMore] = useState(true);
+  const [evFilter, setEvFilter] = useState<EventsFilter>({ q: '', status: '', type: '' });
+  const [evSortDir, setEvSortDir] = useState<'asc'|'desc'>('desc');
+  const applyEvFilters = async (resetPage = true) => {
+    setEventsLoading(true);
+    try {
+      const page = resetPage ? 0 : eventsPage;
+      const r = await api.get('/events', { params: {
+        page, size: 50,
+        q: evFilter.q || undefined,
+        status: evFilter.status || undefined,
+        type: evFilter.type || undefined,
+        sort: 'eventTimestamp',
+        dir: evSortDir,
+      }});
+      const items: EventModel[] = (r.data.items ?? r.data ?? []) as any;
+      setEvents(resetPage ? items : [...events, ...items]);
+      setEventsHasMore(items.length === 50);
+      setEventsPage(page);
+      // Update URL hash with filters
+      const params = new URLSearchParams();
+      if (evFilter.q) params.set('q', evFilter.q);
+      if (evFilter.status) params.set('status', evFilter.status);
+      if (evFilter.type) params.set('type', evFilter.type);
+      if (evSortDir && evSortDir !== 'desc') params.set('dir', evSortDir);
+      const qs = params.toString();
+      window.location.hash = `#/events${qs ? ('?' + qs) : ''}`;
+    } catch { pushToast('Failed to load events'); }
+    finally { setEventsLoading(false); }
+  };
+  useEffect(() => {
+    if (currentPage==='events') {
+      // Parse filters from URL hash
+      const h = window.location.hash;
+      const idx = h.indexOf('?');
+      if (idx >= 0) {
+        const params = new URLSearchParams(h.substring(idx+1));
+        const q = params.get('q') || '';
+        const status = (params.get('status') || '') as any;
+        const type = params.get('type') || '';
+        const dir = (params.get('dir') as 'asc'|'desc') || 'desc';
+        setEvFilter({ q, status, type });
+        setEvSortDir(dir);
+      }
+      applyEvFilters(true);
+    }
+  /* eslint-disable-next-line */ }, [currentPage]);
+
+  // Admin - DLQ/Retention
+  const [dlqOpen, setDlqOpen] = useState(false);
+  const [dlqLoading, setDlqLoading] = useState(false);
+  const [dlqItems, setDlqItems] = useState<any[]>([]);
+  const loadDlq = async () => {
+    setDlqLoading(true);
+    try { const r = await api.get('/admin/dlq/messages'); setDlqItems(r.data.messages ?? []); }
+    catch { pushToast('Failed to load DLQ'); }
+    finally { setDlqLoading(false); }
+  };
+  useEffect(()=>{ if (dlqOpen) loadDlq(); }, [dlqOpen]);
+
+  const StatCard: React.FC<StatCardProps> = ({ icon: Icon, title, value, change, color, subtitle }) => (
+    <div className="stat-card" style={{ '--card-color': color } as React.CSSProperties}>
+      <div className="stat-card-content">
+        <div className="stat-icon-wrapper">
+          <Icon className="stat-icon" size={24} />
+        </div>
+        <div className="stat-info">
+          <div className="stat-title">{title}</div>
+          <div className="stat-value">{value.toLocaleString()}</div>
+          {subtitle && <div className="stat-subtitle">{subtitle}</div>}
+          {change && (
+            <div className={`stat-change ${change > 0 ? 'positive' : 'negative'}`}>
+              <TrendingUp size={14} />
+              <span>{change > 0 ? '+' : ''}{change}% from last week</span>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="stat-card-glow"></div>
+    </div>
+  );
+
+  const EventRow: React.FC<EventRowProps> = ({ event, onOpen, onFilter, onCopy }) => (
+    <div className="event-row">
+      <button className="event-id as-link" title="Copy ID" onClick={() => onCopy(event.id)}>{event.id}</button>
+      <div className="event-type">
+        <button className={`type-badge ${String(event.type || '').toLowerCase()}`} onClick={() => onFilter({ type: event.type })} aria-pressed>
+          {event.type || 'N/A'}
+        </button>
+      </div>
+      <div className="event-amount">Source: {event.sourceSystem || '-'}</div>
+      <div className="event-status">
+        <button className={`status-badge ${String(event.status).toLowerCase()}`} onClick={() => onFilter({ status: event.status as any })} aria-pressed>
+          {String(event.status).toUpperCase()}
+        </button>
+      </div>
+      <div className="event-time" title={new Date(event.eventTimestamp).toLocaleString()}>{relTime(event.eventTimestamp)}</div>
+      <button className="event-action" onClick={() => onOpen(event)} aria-label="Open details">
+        <ChevronRight size={16} />
+      </button>
+    </div>
+  );
+
+  const AuditLogRow: React.FC<AuditLogRowProps> = ({ log, onOpen }) => (
+    <div className="audit-row" role="button" tabIndex={0} onClick={() => onOpen?.(log)} onKeyDown={(e)=>{ if (e.key==='Enter' || e.key===' ') onOpen?.(log); }}>
+      <div className={`audit-level ${log.level.toLowerCase()}`}>
+        <div className="level-dot"></div>
+        {log.level}
+      </div>
+      <div className="audit-action">{log.action}</div>
+      <div className="audit-message">{(log as any).message || ''}</div>
+      <div className="audit-user">{log.eventId || 'System'}</div>
+      <div className="audit-time" title={new Date((log as any).loggedAt || Date.now()).toLocaleString()}>{relTime((log as any).loggedAt || new Date().toISOString())}</div>
+    </div>
+  );
+
+  const DashboardPage = () => (
+    <div className="page-content">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Dashboard Overview</h1>
+          <p className="page-subtitle">Real-time custody connect system monitoring</p>
+        </div>
+        <div className="header-actions">
+          <button className="btn-secondary" onClick={async () => {
+            try {
+              const lines: string[] = [];
+              lines.push('Dashboard Snapshot');
+              lines.push(`Generated,${new Date().toISOString()}`);
+              lines.push('');
+              lines.push('KPIs');
+              lines.push('Metric,Value');
+              lines.push(`Total Events,${countTotal ?? ''}`);
+              lines.push(`Processed Events,${countProcessed ?? ''}`);
+              lines.push(`Failed Events,${countFailed ?? ''}`);
+              lines.push('');
+              lines.push('Recent Events');
+              lines.push('id,type,sourceSystem,status,eventTimestamp');
+              for (const e of recentEvents) {
+                lines.push([e.id,e.type,e.sourceSystem,e.status,e.eventTimestamp].map(v=>`"${String(v ?? '').replace(/"/g,'""')}"`).join(','));
+              }
+              lines.push('');
+              lines.push('Latest Audit Logs');
+              lines.push('id,eventId,action,level,loggedAt,message');
+              for (const a of auditPreview) {
+                lines.push([a.id,a.eventId ?? '',a.action,a.level,a.loggedAt,a.message ?? ''].map(v=>`"${String(v ?? '').replace(/"/g,'""')}"`).join(','));
+              }
+              const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url; a.download = 'dashboard_snapshot.csv'; a.click();
+              URL.revokeObjectURL(url);
+            } catch { /* noop */ }
+          }}>
+            <Download size={18} />
+            Export Report
+          </button>
+          <button className="btn-primary" onClick={() => { setRefreshTick(t => t+1); }} disabled={isRefreshing}>
+            <RefreshCw size={18} />
+            {isRefreshing ? 'Refreshing…' : 'Refresh Data'}
+          </button>
+        </div>
+      </div>
+
+      <div className="stats-grid">
+        <StatCard
+          icon={Activity}
+          title="Total Events"
+          value={(countTotal ?? 0)}
+          change={12.5}
+          color="#3b82f6"
+          subtitle="All time"
+        />
+        <StatCard
+          icon={Shield}
+          title="Processed Events"
+          value={(countProcessed ?? 0)}
+          change={8.3}
+          color="#10b981"
+          subtitle="Successfully completed"
+        />
+        <StatCard
+          icon={AlertCircle}
+          title="Failed Events"
+          value={(countFailed ?? 0)}
+          change={-2.1}
+          color="#ef4444"
+          subtitle="Requires attention"
+        />
+        <StatCard
+          icon={FileText}
+          title="Audit Logs"
+          value={auditPreview.length}
+          change={15.2}
+          color="#8b5cf6"
+          subtitle="Latest fetched"
+        />
+      </div>
+
+      <div className="dashboard-grid">
+        <div className="card performance-card">
+          <div className="card-header">
+            <div>
+              <h3 className="card-title">System Performance</h3>
+              <p className="card-subtitle">Real-time metrics</p>
+            </div>
+            <div className="range-wrapper">
+              <Clock size={20} className="card-icon" />
+              <div className="range-pills" role="tablist" aria-label="Range">
+                {(['all','1h','24h','7d'] as RangeKey[]).map(r => (
+                  <button key={r} role="tab" aria-selected={range===r} className={`pill ${range===r?'active':''}`} onClick={() => setRange(r)}>{r==='all'?'All':r}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div className="performance-metrics">
+            <div className="metric">
+              <div className="metric-label">Avg Processing Time</div>
+              <div className="metric-value">N/A</div>
+            </div>
+            <div className="metric">
+              <div className="metric-label">Success Rate</div>
+              <div className="metric-value">{countTotal && countTotal>0 ? (((countProcessed ?? 0)/countTotal)*100).toFixed(1) : '—'}%</div>
+            </div>
+            <div className="metric">
+              <div className="metric-label">Active Connections</div>
+              <div className="metric-value">24</div>
+            </div>
+          </div>
+          <div className="chart-placeholder">
+            <div className="chart-bar" style={{ height: '60%' }}></div>
+            <div className="chart-bar" style={{ height: '85%' }}></div>
+            <div className="chart-bar" style={{ height: '70%' }}></div>
+            <div className="chart-bar" style={{ height: '95%' }}></div>
+            <div className="chart-bar" style={{ height: '75%' }}></div>
+            <div className="chart-bar" style={{ height: '88%' }}></div>
+            <div className="chart-bar" style={{ height: '92%' }}></div>
+          </div>
+        </div>
+
+        <div className="card recent-events-card">
+          <div className="card-header">
+            <div>
+              <h3 className="card-title">Recent Events</h3>
+              <p className="card-subtitle">Latest transactions</p>
+            </div>
+            <button className="view-all-btn" onClick={() => navigate('events')}>
+              View All <ChevronRight size={16} />
+            </button>
+          </div>
+          <div className="events-list">
+            {recentEvents
+              .filter(e => !searchQuery || `${e.id} ${e.type} ${e.sourceSystem} ${e.status}`.toLowerCase().includes(searchQuery.toLowerCase()))
+              .map(ev => (
+                <EventRow key={ev.id} event={ev} onOpen={setOpenEvent} onFilter={()=>{}} onCopy={(id)=>{navigator.clipboard.writeText(id);}} />
+              ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="card audit-preview-card">
+        <div className="card-header">
+          <div>
+            <h3 className="card-title">Audit Trail</h3>
+            <p className="card-subtitle">Recent system activities</p>
+          </div>
+          <button className="view-all-btn" onClick={() => navigate('audit')}>
+            View All <ChevronRight size={16} />
+          </button>
+        </div>
+        <div className="audit-list">
+          {auditPreview.map(log => (
+            <AuditLogRow key={log.id} log={log} onOpen={setOpenAudit} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  const EventsPage = () => (
+    <div className="page-content">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Events Management</h1>
+          <p className="page-subtitle">Monitor and manage all financial events</p>
+        </div>
+      </div>
+
+      <div className="card filters-card">
+        <div className="filters-grid">
+          <div className="search-box">
+            <Search size={20} />
+            <input
+              type="text"
+              placeholder="Search events..."
+              value={evFilter.q}
+              onChange={(e)=> setEvFilter(f => ({...f, q: e.target.value}))}
+              onKeyDown={(e)=>{ if (e.key==='Enter') applyEvFilters(true); if (e.key==='Escape'){ setEvFilter(f=>({...f, q: ''})); } }}
+            />
+          </div>
+          <select className="filter-select" value={evFilter.status} onChange={(e)=> setEvFilter(f=>({...f, status: (e.target.value.toLowerCase() as any) }))}>
+            <option value="">All Status</option>
+            <option value="processed">Processed</option>
+            <option value="pending">Pending</option>
+            <option value="failed">Failed</option>
+          </select>
+          <select className="filter-select" value={evFilter.type} onChange={(e)=> setEvFilter(f=>({...f, type: e.target.value }))}>
+            <option value="">All Types</option>
+            <option value="TRANSFER">Transfer</option>
+            <option value="DEPOSIT">Deposit</option>
+            <option value="WITHDRAWAL">Withdrawal</option>
+          </select>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <button className="btn-primary" onClick={() => applyEvFilters(true)}>Apply Filters</button>
+            {(evFilter.q || evFilter.status || evFilter.type) && (
+              <button className="btn-secondary" onClick={() => { setEvFilter({ q: '', status: '', type: '' }); setTimeout(()=>applyEvFilters(true), 0); }}>Reset</button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display:'flex', gap:'0.5rem', alignItems:'center', justifyContent:'flex-end', marginBottom: '0.75rem' }}>
+        <span style={{ color:'#e2e8f0', fontSize:'0.9rem' }}>Sort by time:</span>
+        <button className="btn-secondary" onClick={()=>{ setEvSortDir('asc'); applyEvFilters(true); }} aria-pressed={evSortDir==='asc'}>Asc</button>
+        <button className="btn-secondary" onClick={()=>{ setEvSortDir('desc'); applyEvFilters(true); }} aria-pressed={evSortDir==='desc'}>Desc</button>
+      </div>
+
+      <div className="card events-table-card">
+        <div className="events-list large">
+          {events.map((event) => (
+            <EventRow
+              key={event.id}
+              event={event}
+              onOpen={setOpenEvent}
+              onFilter={(f)=>{ setEvFilter(prev=> ({...prev, ...f, status: f.status ? (f.status as any).toLowerCase() : prev.status })); setTimeout(()=>applyEvFilters(true), 0); }}
+              onCopy={(id)=>{ navigator.clipboard.writeText(id); }}
+            />
+          ))}
+          {events.length===0 && !eventsLoading && (
+            <div style={{ padding: '1rem', color: '#64748b' }}>No events match your filters. <button className="as-link" onClick={()=>{ setEvFilter({ q:'', status:'', type:'' }); applyEvFilters(true); }}>Clear filters</button></div>
+          )}
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', marginTop: '1rem' }}>
+          <button className="btn-secondary" onClick={()=> applyEvFilters(true)} disabled={eventsLoading}>{eventsLoading? 'Loading…' : 'Refresh'}</button>
+          {eventsHasMore && (
+            <button className="btn-primary" onClick={()=>{ setEventsPage(p=>p+1); setEventsLoading(true); api.get('/events', { params: { page: eventsPage+1, size: 50, q: evFilter.q || undefined, status: evFilter.status || undefined, type: evFilter.type || undefined } }).then(r=>{ const items: EventModel[] = (r.data.items ?? r.data ?? []) as any; setEvents(e=>[...e, ...items]); setEventsHasMore(items.length===50); }).catch(()=>pushToast('Failed to load more')).finally(()=>setEventsLoading(false)); }}>Load more</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
+  const AdminPage = () => (
+    <div className="page-content">
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Administration</h1>
+          <p className="page-subtitle">System management and maintenance</p>
+        </div>
+      </div>
+
+      <div className="admin-grid">
+        <div className="card admin-card">
+          <div className="admin-card-icon" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
+            <RefreshCw size={28} />
+          </div>
+          <h3 className="admin-card-title">DLQ Management</h3>
+          <p className="admin-card-desc">Reprocess failed messages from dead letter queue</p>
+          <button className="btn-admin" onClick={()=> setDlqOpen(true)}>Manage DLQ</button>
+        </div>
+
+        <div className="card admin-card">
+          <div className="admin-card-icon" style={{ background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)' }}>
+            <Database size={28} />
+          </div>
+          <h3 className="admin-card-title">Data Retention</h3>
+          <p className="admin-card-desc">Configure and execute retention policies</p>
+          <button className="btn-admin" onClick={async ()=>{
+            if (!window.confirm('Run retention now?')) return;
+            try { await api.post('/admin/retention/run'); pushToast('Retention job started'); }
+            catch { pushToast('Retention job failed'); }
+          }}>Run Retention</button>
+        </div>
+
+        <div className="card admin-card">
+          <div className="admin-card-icon" style={{ background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)' }}>
+            <Shield size={28} />
+          </div>
+          <h3 className="admin-card-title">Security Audit</h3>
+          <p className="admin-card-desc">Review security logs and access patterns</p>
+          <button className="btn-admin" onClick={()=> navigate('audit')}>View Audit</button>
+        </div>
+
+        <div className="card admin-card">
+          <div className="admin-card-icon" style={{ background: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)' }}>
+            <Settings size={28} />
+          </div>
+          <h3 className="admin-card-title">System Config</h3>
+          <p className="admin-card-desc">Manage system settings and preferences</p>
+          <button className="btn-admin" onClick={()=> setSettingsOpen(true)}>Configure</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="app">
+      <style>{`
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+        }
+
+        .app {
+          min-height: 100vh;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          position: relative;
+          overflow-x: hidden;
+        }
+
+        .app::before {
+          content: '';
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 0;
+          background:
+            radial-gradient(circle at 20% 30%, rgba(102, 126, 234, 0.4) 0%, transparent 50%),
+            radial-gradient(circle at 80% 70%, rgba(118, 75, 162, 0.4) 0%, transparent 50%);
+          pointer-events: none;
+        }
+
+        .navbar {
+          position: fixed;
+          top: 0;
+          left: 0;
+          right: 0;
+          height: 70px;
+          background: rgba(255, 255, 255, 0.95);
+          backdrop-filter: blur(20px);
+          border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+          display: flex;
+          align-items: center;
+          padding: 0 2rem;
+          z-index: 100;
+          box-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+        }
+
+        .api-banner {
+          position: fixed;
+          top: 70px;
+          left: 0;
+          right: 0;
+          background: #ffe8e8;
+          color: #7a1f1f;
+          border-bottom: 1px solid #f5b5b5;
+          padding: 8px 16px;
+          text-align: center;
+          font-size: 14px;
+          z-index: 120;
+        }
+
+        .api-banner code {
+          background: rgba(0,0,0,0.06);
+          padding: 2px 4px;
+          border-radius: 4px;
+        }
+
+        .navbar-brand {
+          display: flex;
+          align-items: center;
+          gap: 0.75rem;
+          font-size: 1.5rem;
+          font-weight: 700;
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          -webkit-background-clip: text;
+          -webkit-text-fill-color: transparent;
+          background-clip: text;
+        }
+
+        .navbar-search {
+          flex: 1;
+          max-width: 500px;
+          margin: 0 3rem;
+          position: relative;
+        }
+
+        .navbar-search input {
+          width: 100%;
+          padding: 0.75rem 1rem 0.75rem 3rem;
+          border: 2px solid rgba(102, 126, 234, 0.1);
+          border-radius: 12px;
+          font-size: 0.95rem;
+          transition: all 0.3s ease;
+          background: rgba(102, 126, 234, 0.05);
+        }
+        .navbar-search input:focus {
+          outline: none;
+          border-color: #667eea;
+          background: white;
+          box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }
+
+        .navbar-search svg {
+          position: absolute;
+          left: 1rem;
+          top: 50%;
+          transform: translateY(-50%);
+          color: #94a3b8;
+        }
+
+        .navbar-actions {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+        }
+
+        .icon-btn {
+          width: 42px;
+          height: 42px;
+          border-radius: 12px;
+          border: none;
+          background: rgba(102, 126, 234, 0.08);
+          color: #667eea;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          position: relative;
+        }
+
+        .icon-btn:hover {
+          background: rgba(102, 126, 234, 0.15);
+          transform: translateY(-2px);
+        }
+
+        .icon-btn.notification::after {
+          content: '';
+          position: absolute;
+          top: 8px;
+          right: 8px;
+          width: 8px;
+          height: 8px;
+          background: #ef4444;
+          border-radius: 50%;
+          border: 2px solid white;
+        }
+
+        .sidebar {
+          position: fixed;
+          left: 0;
+          top: 70px;
+          bottom: 0;
+          width: 280px;
+          background: rgba(255, 255, 255, 0.95);
+          backdrop-filter: blur(20px);
+          border-right: 1px solid rgba(255, 255, 255, 0.2);
+          padding: 2rem 1rem;
+          transition: transform 0.3s ease;
+          z-index: 50;
+          overflow-y: auto;
+        }
+
+        .sidebar.closed {
+          transform: translateX(-100%);
+        }
+
+        .nav-item {
+          display: flex;
+          align-items: center;
+          gap: 1rem;
+          padding: 1rem 1.25rem;
+          border-radius: 12px;
+          margin-bottom: 0.5rem;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          color: #64748b;
+          font-weight: 500;
+          border: 2px solid transparent;
+        }
+
+        .nav-item:hover {
+          background: rgba(102, 126, 234, 0.08);
+          color: #667eea;
+        }
+
+        .nav-item.active {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+
+        .nav-item svg {
+          flex-shrink: 0;
+        }
+
+        .main-content {
+          margin-left: 280px;
+          margin-top: 70px;
+          padding: 2rem;
+          transition: margin-left 0.3s ease;
+          position: relative;
+          z-index: 1;
+        }
+
+        .main-content.expanded {
+          margin-left: 0;
+        }
+
+        .page-content {
+          max-width: 1600px;
+          margin: 0 auto;
+        }
+
+        .page-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 2rem;
+        }
+
+        .page-title {
+          font-size: 2.5rem;
+          font-weight: 700;
+          color: white;
+          margin-bottom: 0.5rem;
+          text-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .page-subtitle {
+          font-size: 1.1rem;
+          color: rgba(255, 255, 255, 0.9);
+        }
+
+        .header-actions {
+          display: flex;
+          gap: 1rem;
+        }
+
+        .btn-primary, .btn-secondary {
+          padding: 0.875rem 1.75rem;
+          border-radius: 12px;
+          border: none;
+          font-weight: 600;
+          font-size: 0.95rem;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+          background: white;
+          color: #667eea;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
+        .btn-primary:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 6px 20px rgba(0, 0, 0, 0.15);
+        }
+
+        .btn-secondary {
+          background: rgba(255, 255, 255, 0.2);
+          color: white;
+          backdrop-filter: blur(10px);
+        }
+
+        .btn-secondary:hover {
+          background: rgba(255, 255, 255, 0.3);
+        }
+
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+          gap: 1.5rem;
+          margin-bottom: 2rem;
+        }
+
+        .stat-card {
+          background: rgba(255, 255, 255, 0.95);
+          backdrop-filter: blur(20px);
+          border-radius: 20px;
+          padding: 2rem;
+          position: relative;
+          overflow: hidden;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          transition: all 0.3s ease;
+        }
+
+        .stat-card:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+        }
+
+        .stat-card-content {
+          display: flex;
+          gap: 1.5rem;
+          position: relative;
+          z-index: 2;
+        }
+
+        .stat-icon-wrapper {
+          width: 60px;
+          height: 60px;
+          border-radius: 16px;
+          background: var(--card-color);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .stat-icon {
+          color: white;
+        }
+
+        .stat-info {
+          flex: 1;
+        }
+
+        .stat-title {
+          font-size: 0.875rem;
+          color: #64748b;
+          font-weight: 500;
+          margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+          font-size: 2rem;
+          font-weight: 700;
+          color: #1e293b;
+          margin-bottom: 0.25rem;
+        }
+
+        .stat-subtitle {
+          font-size: 0.8rem;
+          color: #94a3b8;
+          margin-bottom: 0.5rem;
+        }
+
+        .stat-change {
+          display: flex;
+          align-items: center;
+          gap: 0.25rem;
+          font-size: 0.85rem;
+          font-weight: 600;
+          margin-top: 0.5rem;
+        }
+
+        .stat-change.positive {
+          color: #10b981;
+        }
+
+        .stat-change.negative {
+          color: #ef4444;
+        }
+
+        .stat-card-glow {
+          position: absolute;
+          top: -50%;
+          right: -50%;
+          width: 200%;
+          height: 200%;
+          background: radial-gradient(circle, var(--card-color), transparent 70%);
+          opacity: 0.1;
+          pointer-events: none;
+        }
+
+        .dashboard-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 1.5rem;
+          margin-bottom: 2rem;
+        }
+
+        .card {
+          background: rgba(255, 255, 255, 0.95);
+          backdrop-filter: blur(20px);
+          border-radius: 20px;
+          padding: 2rem;
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+        }
+
+        .card-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin-bottom: 1.5rem;
+        }
+
+        .card-title {
+          font-size: 1.25rem;
+          font-weight: 700;
+          color: #1e293b;
+          margin-bottom: 0.25rem;
+        }
+
+        .card-subtitle {
+          font-size: 0.9rem;
+          color: #64748b;
+        }
+
+        .card-icon {
+          color: #667eea;
+        }
+
+        .range-wrapper { display:flex; gap:0.5rem; align-items:center; }
+        .range-pills { display:flex; gap:0.25rem; }
+        .pill { border:1px solid rgba(102,126,234,0.3); background: white; color:#667eea; padding:0.25rem 0.5rem; border-radius:999px; font-weight:600; font-size:0.8rem; cursor:pointer; }
+        .pill.active { background:#667eea; color:white; }
+
+        .view-all-btn {
+          display: flex;
+          align-items: center;
+          gap: 0.25rem;
+          padding: 0.5rem 1rem;
+          background: rgba(102, 126, 234, 0.08);
+          color: #667eea;
+          border: none;
+          border-radius: 8px;
+          font-weight: 600;
+          font-size: 0.875rem;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .view-all-btn:hover {
+          background: rgba(102, 126, 234, 0.15);
+        }
+
+        .performance-metrics {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 1.5rem;
+          margin-bottom: 2rem;
+        }
+
+        .metric {
+          text-align: center;
+        }
+
+        .metric-label {
+          font-size: 0.875rem;
+          color: #64748b;
+          margin-bottom: 0.5rem;
+        }
+
+        .metric-value {
+          font-size: 1.5rem;
+          font-weight: 700;
+          color: #1e293b;
+        }
+
+        .chart-placeholder {
+          display: flex;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 0.75rem;
+          height: 150px;
+          padding: 1rem;
+          background: rgba(102, 126, 234, 0.05);
+          border-radius: 12px;
+        }
+
+        .chart-bar {
+          flex: 1;
+          background: linear-gradient(to top, #667eea, #764ba2);
+          border-radius: 6px 6px 0 0;
+          transition: all 0.3s ease;
+          opacity: 0.8;
+        }
+
+        .chart-bar:hover {
+          opacity: 1;
+          transform: scaleY(1.05);
+        }
+
+        .events-list {
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
+        }
+
+        .events-list.large {
+          max-height: 600px;
+          overflow-y: auto;
+        }
+
+        .event-row {
+          display: grid;
+          grid-template-columns: 1.5fr 1fr 1.5fr 1fr 1fr 60px;
+          gap: 1rem;
+          padding: 1rem;
+          background: rgba(102, 126, 234, 0.03);
+          border-radius: 12px;
+          align-items: center;
+          transition: all 0.3s ease;
+          border: 1px solid transparent;
+        }
+
+        .event-row:hover {
+          background: rgba(102, 126, 234, 0.08);
+          border-color: rgba(102, 126, 234, 0.2);
+          transform: translateX(4px);
+        }
+
+        .event-id {
+          font-weight: 600;
+          color: #667eea;
+          font-size: 0.9rem;
+        }
+        .event-id.as-link { background:none; border:none; text-align:left; cursor:pointer; }
+        .as-link { background:none; border:none; color:#667eea; cursor:pointer; padding:0; }
+
+        .event-type, .event-amount, .event-time {
+          font-size: 0.9rem;
+          color: #64748b;
+        }
+
+        .event-amount {
+          font-weight: 600;
+          color: #1e293b;
+        }
+
+        .type-badge, .status-badge {
+          display: inline-block;
+          padding: 0.35rem 0.75rem;
+          border-radius: 6px;
+          font-size: 0.75rem;
+          font-weight: 600;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+
+        .type-badge.transfer {
+          background: #dbeafe;
+          color: #1e40af;
+        }
+
+        .type-badge.deposit {
+          background: #d1fae5;
+          color: #065f46;
+        }
+
+        .type-badge.withdrawal {
+          background: #fef3c7;
+          color: #92400e;
+        }
+
+        .status-badge.processed {
+          background: #d1fae5;
+          color: #065f46;
+        }
+
+        .status-badge.pending {
+          background: #fef3c7;
+          color: #92400e;
+        }
+
+        .status-badge.failed {
+          background: #fee2e2;
+          color: #991b1b;
+        }
+
+        .event-action {
+          width: 36px;
+          height: 36px;
+          border-radius: 8px;
+          border: 1px solid rgba(102, 126, 234, 0.2);
+          background: white;
+          color: #667eea;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .event-action:hover {
+          background: #667eea;
+          color: white;
+        }
+
+        .audit-list {
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
+        }
+
+        .audit-row {
+          display: grid;
+          grid-template-columns: 120px 180px 1fr 120px 140px;
+          gap: 1rem;
+          padding: 1rem;
+          background: rgba(102, 126, 234, 0.03);
+          border-radius: 12px;
+          align-items: center;
+          font-size: 0.9rem;
+          border-left: 3px solid transparent;
+          transition: all 0.3s ease;
+        }
+
+        .audit-row:hover {
+          background: rgba(102, 126, 234, 0.08);
+          border-left-color: #667eea;
+        }
+
+        .audit-level {
+          display: flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-weight: 600;
+          font-size: 0.8rem;
+          text-transform: uppercase;
+        }
+
+        .level-dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+        }
+
+        .audit-level.info {
+          color: #0284c7;
+        }
+
+        .audit-level.info .level-dot {
+          background: #0284c7;
+        }
+
+        .audit-level.warning {
+          color: #f59e0b;
+        }
+
+        .audit-level.warning .level-dot {
+          background: #f59e0b;
+        }
+
+        .audit-level.error {
+          color: #dc2626;
+        }
+
+        .audit-level.error .level-dot {
+          background: #dc2626;
+        }
+
+        .audit-action {
+          font-weight: 600;
+          color: #1e293b;
+        }
+
+        .audit-message {
+          color: #64748b;
+        }
+
+        .audit-user, .audit-time {
+          color: #94a3b8;
+          font-size: 0.85rem;
+        }
+
+        .filters-card {
+          margin-bottom: 1.5rem;
+        }
+
+        .filters-grid {
+          display: grid;
+          grid-template-columns: 2fr 1fr 1fr auto;
+          gap: 1rem;
+          align-items: center;
+        }
+
+        .search-box {
+          position: relative;
+        }
+
+        .search-box svg {
+          position: absolute;
+          left: 1rem;
+          top: 50%;
+          transform: translateY(-50%);
+          color: #94a3b8;
+        }
+
+        .search-box input {
+          width: 100%;
+          padding: 0.875rem 1rem 0.875rem 3rem;
+          border: 2px solid rgba(102, 126, 234, 0.1);
+          border-radius: 12px;
+          font-size: 0.95rem;
+          transition: all 0.3s ease;
+          background: white;
+        }
+
+        .search-box input:focus {
+          outline: none;
+          border-color: #667eea;
+          box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }
+
+        .filter-select {
+          padding: 0.875rem 1rem;
+          border: 2px solid rgba(102, 126, 234, 0.1);
+          border-radius: 12px;
+          font-size: 0.95rem;
+          background: white;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .filter-select:focus {
+          outline: none;
+          border-color: #667eea;
+        }
+
+        .admin-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+          gap: 1.5rem;
+        }
+
+        .admin-card {
+          text-align: center;
+          padding: 2.5rem 2rem;
+          transition: all 0.3s ease;
+        }
+
+        .admin-card:hover {
+          transform: translateY(-6px);
+          box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+        }
+
+        .admin-card-icon {
+          width: 80px;
+          height: 80px;
+          border-radius: 20px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          margin: 0 auto 1.5rem;
+          color: white;
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+        }
+
+        .admin-card-title {
+          font-size: 1.25rem;
+          font-weight: 700;
+          color: #1e293b;
+          margin-bottom: 0.75rem;
+        }
+
+        .admin-card-desc {
+          font-size: 0.95rem;
+          color: #64748b;
+          margin-bottom: 1.5rem;
+          line-height: 1.6;
+        }
+
+        .btn-admin {
+          width: 100%;
+          padding: 0.875rem;
+          border-radius: 12px;
+          border: 2px solid rgba(102, 126, 234, 0.2);
+          background: white;
+          color: #667eea;
+          font-weight: 600;
+          font-size: 0.95rem;
+          cursor: pointer;
+          transition: all 0.3s ease;
+        }
+
+        .btn-admin:hover {
+          background: #667eea;
+          color: white;
+          border-color: #667eea;
+        }
+
+        .audit-preview-card {
+          grid-column: 1 / -1;
+        }
+
+        /* Modal */
+        .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index: 200; }
+        .modal-panel { background:white; border-radius: 16px; max-width: 95vw; max-height: 90vh; overflow:auto; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+        .modal-header { display:flex; align-items:center; justify-content:space-between; padding: 1rem 1.25rem; border-bottom:1px solid #e5e7eb; }
+        .modal-body { padding: 1rem 1.25rem; }
+
+        /* Drawer */
+        .drawer-backdrop { position: fixed; inset:0; background: rgba(0,0,0,0.3); display:flex; z-index: 180; }
+        .drawer-panel { width: 520px; background:white; margin-left:auto; height:100%; box-shadow: -8px 0 24px rgba(0,0,0,0.1); display:flex; flex-direction:column; }
+        .drawer-panel.left { margin-left: 0; margin-right:auto; }
+        .drawer-header { display:flex; align-items:center; justify-content:space-between; padding:1rem 1.25rem; border-bottom:1px solid #e5e7eb; }
+        .drawer-body { padding: 1rem 1.25rem; overflow:auto; }
+
+        /* Popover */
+        .popover { position: absolute; top: 70px; right: 1rem; background:white; border:1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 12px 24px rgba(0,0,0,0.12); padding:0.5rem; z-index: 160; min-width: 320px; }
+
+        /* Toasts */
+        .toast-region { position: fixed; right: 1rem; bottom: 1rem; display:flex; flex-direction:column; gap:0.5rem; z-index: 220; }
+        .toast { display:flex; align-items:center; gap:0.5rem; padding:0.75rem 1rem; background: rgba(255,255,255,0.95); border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 8px 20px rgba(0,0,0,0.08); }
+
+        @media (max-width: 1200px) {
+          .dashboard-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .stats-grid {
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+          }
+        }
+
+        @media (max-width: 768px) {
+          .sidebar {
+            transform: translateX(-100%);
+          }
+
+          .sidebar.open {
+            transform: translateX(0);
+          }
+
+          .main-content {
+            margin-left: 0;
+          }
+
+          .navbar-search {
+            display: none;
+          }
+
+          .page-header {
+            flex-direction: column;
+            gap: 1rem;
+          }
+
+          .header-actions {
+            width: 100%;
+          }
+
+          .header-actions button {
+            flex: 1;
+          }
+
+          .filters-grid {
+            grid-template-columns: 1fr;
+          }
+
+          .event-row {
+            grid-template-columns: 1fr;
+            gap: 0.5rem;
+          }
+
+          .event-action {
+            justify-self: end;
+          }
+
+          .audit-row {
+            grid-template-columns: 1fr;
+            gap: 0.5rem;
+          }
+
+          .stats-grid {
+            grid-template-columns: 1fr;
+          }
+          .drawer-panel { width: 100%; }
+          .popover { right: 0.5rem; min-width: 280px; }
+        }
+
+        ::-webkit-scrollbar {
+          width: 8px;
+          height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+          background: rgba(102, 126, 234, 0.05);
+          border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb {
+          background: rgba(102, 126, 234, 0.3);
+          border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+          background: rgba(102, 126, 234, 0.5);
+        }
+      `}</style>
+
+      {apiUp === false && (
+        <div className="api-banner">
+          Backend not reachable at <code>{API_BASE}</code>. Check your .env or dev proxy.
+        </div>
+      )}
+
+      {/* Navbar */}
+      <nav className="navbar">
+        <button className="icon-btn" onClick={() => setSidebarOpen(!sidebarOpen)}>
+          {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
+        </button>
+        <div className="navbar-brand">
+          <Shield size={32} />
+          Custody Connect
+        </div>
+        <div className="navbar-search">
+          <Search size={20} />
+          <input
+            type="text"
+            placeholder="Search events, transactions, logs..."
+            id="global-search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e)=>{ if (e.key==='Enter') { navigate('events'); setEvFilter(f=>({...f, q: searchQuery })); setTimeout(()=>applyEvFilters(true), 0);} if (e.key==='Escape') setSearchQuery(''); }}
+          />
+        </div>
+        <div className="navbar-actions">
+          <button className={`icon-btn ${unread ? 'notification' : ''}`} ref={bellRef} onClick={()=> setNotifOpen(o=>!o)} aria-haspopup="menu" aria-expanded={notifOpen} aria-label="Notifications">
+            <Bell size={20} />
+          </button>
+          <button className="icon-btn" onClick={()=> setSettingsOpen(true)} aria-label="Settings">
+            <Settings size={20} />
+          </button>
+          <button className="icon-btn" onClick={()=> setHelpOpen(true)} aria-label="Help & Shortcuts">
+            <ExternalLink size={20} />
+          </button>
+          <button className="icon-btn">
+            <LogOut size={20} />
+          </button>
+        </div>
+      </nav>
+
+      {/* Sidebar */}
+      <aside className={`sidebar ${sidebarOpen ? '' : 'closed'}`}>
+        <div
+          className={`nav-item ${currentPage === 'dashboard' ? 'active' : ''}`}
+          role="button" aria-current={currentPage==='dashboard'} tabIndex={0}
+          onClick={() => navigate('dashboard')}
+          onKeyDown={(e)=>{ if (e.key==='Enter' || e.key===' ') navigate('dashboard'); }}
+        >
+          <BarChart3 size={20} />
+          Dashboard
+        </div>
+        <div
+          className={`nav-item ${currentPage === 'events' ? 'active' : ''}`}
+          role="button" aria-current={currentPage==='events'} tabIndex={0}
+          onClick={() => navigate('events')}
+          onKeyDown={(e)=>{ if (e.key==='Enter' || e.key===' ') navigate('events'); }}
+        >
+          <Activity size={20} />
+          Events
+        </div>
+        <div
+          className={`nav-item ${currentPage === 'audit' ? 'active' : ''}`}
+          role="button" aria-current={currentPage==='audit'} tabIndex={0}
+          onClick={() => navigate('audit')}
+          onKeyDown={(e)=>{ if (e.key==='Enter' || e.key===' ') navigate('audit'); }}
+        >
+          <FileText size={20} />
+          Audit Logs
+        </div>
+        <div
+          className={`nav-item ${currentPage === 'admin' ? 'active' : ''}`}
+          role="button" aria-current={currentPage==='admin'} tabIndex={0}
+          onClick={() => navigate('admin')}
+          onKeyDown={(e)=>{ if (e.key==='Enter' || e.key===' ') navigate('admin'); }}
+        >
+          <Shield size={20} />
+          Administration
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className={`main-content ${sidebarOpen ? '' : 'expanded'}`}>
+        {currentPage === 'dashboard' && <DashboardPage />}
+        {currentPage === 'events' && <EventsPage />}
+        {currentPage === 'audit' && (
+          <div className="page-content">
+            <div className="page-header">
+              <div>
+                <h1 className="page-title">Audit Logs</h1>
+                <p className="page-subtitle">Complete system activity trail with cryptographic verification</p>
+              </div>
+              <div className="header-actions">
+                <button className="btn-secondary" onClick={()=>{
+                  const lines: string[] = [];
+                  lines.push('id,eventId,action,level,loggedAt,message');
+                  for (const a of auditPreview) { lines.push([a.id,a.eventId ?? '',a.action,a.level,a.loggedAt,a.message ?? ''].map(v=>`"${String(v ?? '').replace(/"/g,'""')}"`).join(',')); }
+                  const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+                  const url = URL.createObjectURL(blob);
+                  const al = document.createElement('a'); al.href = url; al.download = 'audit_logs.csv'; al.click(); URL.revokeObjectURL(url);
+                }}>
+                  <Download size={18} />
+                  Export
+                </button>
+                <button className="btn-primary" onClick={()=> fetchDashboard()}>
+                  <RefreshCw size={18} />
+                  Refresh
+                </button>
+              </div>
+            </div>
+
+            <div className="card audit-preview-card">
+              <div className="card-header">
+                <div>
+                  <h3 className="card-title">System Activity Log</h3>
+                  <p className="card-subtitle">Real-time monitoring of all system operations</p>
+                </div>
+              </div>
+              <div className="audit-list">
+                {auditPreview.map((log) => (
+                  <AuditLogRow key={log.id} log={log} onOpen={setOpenAudit} />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+        {currentPage === 'admin' && <AdminPage />}
+      </main>
+
+      {/* Notifications */}
+      <Popover isOpen={notifOpen} anchorRef={bellRef} onClose={()=> setNotifOpen(false)}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0.5rem 0.75rem' }}>
+          <strong>Notifications</strong>
+          <button className="as-link" onClick={()=>{ markAllRead(); }}>Mark all read</button>
+        </div>
+        <div className="audit-list" style={{ maxHeight: 320, overflowY:'auto' }}>
+          {notifications.map(n => (
+            <div key={n.id} className="audit-row" onClick={()=>{ setNotifOpen(false); navigate('audit'); }}>
+              <div className={`audit-level ${String(n.level).toLowerCase()}`}> <div className="level-dot"></div>{n.level}</div>
+              <div className="audit-action">{n.action}</div>
+              <div className="audit-message">{n.message}</div>
+              <div className="audit-user">{n.eventId || 'System'}</div>
+              <div className="audit-time" title={new Date(n.loggedAt).toLocaleString()}>{relTime(n.loggedAt)}</div>
+            </div>
+          ))}
+          {notifications.length===0 && <div style={{ padding:'0.5rem 0.75rem', color:'#64748b' }}>No notifications</div>}
+        </div>
+      </Popover>
+
+      {/* Settings */}
+      <Modal isOpen={settingsOpen} title="Settings" onClose={()=> setSettingsOpen(false)}>
+        <div style={{ display:'grid', gap:'0.75rem' }}>
+          <label>Theme
+            <select className="filter-select" style={{ width:'100%', marginTop: 6 }} value={settings.theme} onChange={e=> setSettings((s:any)=> ({...s, theme: e.target.value }))}>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+          <label>Time Zone
+            <select className="filter-select" style={{ width:'100%', marginTop: 6 }} value={settings.timeZone} onChange={e=> setSettings((s:any)=> ({...s, timeZone: e.target.value }))}>
+              <option value="local">Local</option>
+              <option value="utc">UTC</option>
+            </select>
+          </label>
+          <label>Dashboard Refresh Interval (sec)
+            <input className="filter-select" style={{ width:'100%', marginTop: 6 }} type="number" min={0} value={settings.refreshIntervalSec} onChange={(e)=> setSettings((s:any)=> ({...s, refreshIntervalSec: Number(e.target.value||0) }))} />
+          </label>
+          <label style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
+            <input type="checkbox" checked={!!settings.compact} onChange={(e)=> setSettings((s:any)=> ({...s, compact: e.target.checked }))} /> Compact density
+          </label>
+          <div style={{ display:'flex', justifyContent:'flex-end', gap:'0.5rem' }}>
+            <button className="btn-secondary" onClick={()=> setSettingsOpen(false)}>Cancel</button>
+            <button className="btn-primary" onClick={()=> { setSettingsOpen(false); }}>Save</button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Help */}
+      <Modal isOpen={helpOpen} title="About & Shortcuts" onClose={()=> setHelpOpen(false)}>
+        <div style={{ display:'grid', gap:'0.5rem' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'0.5rem' }}>
+            <Info size={16} /> Version: 0.1.0
+          </div>
+          <ul style={{ paddingLeft: '1rem', lineHeight: 1.8 }}>
+            <li>/ focus search</li>
+            <li>g d/e/a/s navigate Dashboard/Events/Audit/Admin</li>
+            <li>Esc closes modals/popovers</li>
+          </ul>
+        </div>
+      </Modal>
+
+      {/* Event Details Drawer */}
+      <Drawer isOpen={!!openEvent} title={openEvent ? `Event ${openEvent.id}` : ''} onClose={()=> setOpenEvent(null)}>
+        {openEvent && (
+          <div style={{ display:'grid', gap:'1rem' }}>
+            <div className="card">
+              <div className="card-header"><div><h3 className="card-title">Overview</h3></div></div>
+              <div>
+                <div><strong>Type:</strong> {openEvent.type}</div>
+                <div><strong>Status:</strong> {String(openEvent.status).toUpperCase()}</div>
+                <div><strong>Source:</strong> {openEvent.sourceSystem}</div>
+                <div><strong>Time:</strong> {new Date(openEvent.eventTimestamp).toLocaleString()}</div>
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-header"><div><h3 className="card-title">Payload</h3></div></div>
+              <pre style={{ whiteSpace:'pre-wrap', background:'rgba(102,126,234,0.05)', padding:'0.75rem', borderRadius:8, maxHeight: 280, overflow:'auto' }}>{
+                (()=>{ try { return JSON.stringify(JSON.parse(openEvent.payload || 'null'), null, 2); } catch { return openEvent.payload || '—'; } })()
+              }</pre>
+            </div>
+            <div className="card">
+              <div className="card-header"><div><h3 className="card-title">History & Evidence</h3></div></div>
+              <button className="btn-secondary" onClick={async ()=>{
+                try {
+                  const r = await api.get(`/events/${openEvent.id}/evidence`, { responseType:'blob' });
+                  const url = URL.createObjectURL(r.data);
+                  const a = document.createElement('a'); a.href = url; a.download = `event_${openEvent.id}_evidence.zip`; a.click(); URL.revokeObjectURL(url);
+                } catch { /* noop */ }
+              }}>Download Evidence</button>
+            </div>
+          </div>
+        )}
+      </Drawer>
+
+      {/* Audit Modal */}
+      <Modal isOpen={!!openAudit} title={openAudit ? `Audit ${openAudit.id}` : ''} onClose={()=> setOpenAudit(null)}>
+        {openAudit && (
+          <div style={{ display:'grid', gap:'0.5rem' }}>
+            <div><strong>Action:</strong> {openAudit.action}</div>
+            <div><strong>Level:</strong> {openAudit.level}</div>
+            <div><strong>Event:</strong> {openAudit.eventId || '—'}</div>
+            <div><strong>Time:</strong> {new Date(openAudit.loggedAt).toLocaleString()}</div>
+            <div><strong>Message:</strong> {openAudit.message || '—'}</div>
+            <div><strong>Hash:</strong> {openAudit.hash || '—'}</div>
+            <div><strong>Prev Hash:</strong> {openAudit.prevHash || '—'}</div>
+          </div>
+        )}
+      </Modal>
+
+      {/* DLQ Modal */}
+      <Modal isOpen={dlqOpen} title="Dead Letter Queue" onClose={()=> setDlqOpen(false)} width={900}>
+        <div style={{ display:'flex', justifyContent:'space-between', marginBottom: '0.75rem' }}>
+          <button className="btn-secondary" onClick={loadDlq} disabled={dlqLoading}>{dlqLoading? 'Loading…':'Refresh'}</button>
+          <div style={{ color:'#64748b' }}>Total: {dlqItems.length}</div>
+        </div>
+        <div className="audit-list">
+          {dlqItems.map((m: any) => (
+            <div key={m.id} className="audit-row">
+              <div className="audit-action">DLQ #{m.id}</div>
+              <div className="audit-message">{m.reason}</div>
+              <div className="audit-user">Retries: {m.retryCount}</div>
+              <div className="audit-time" title={new Date(m.failedAt).toLocaleString()}>{relTime(m.failedAt)}</div>
+              <div style={{ display:'flex', gap:'0.5rem' }}>
+                <button className="btn-secondary" onClick={async ()=>{ try { await api.post(`/admin/dlq/${m.id}/reprocess`); pushToast(`Reprocessed #${m.id}`); loadDlq(); } catch { pushToast('Reprocess failed'); } }}>Reprocess</button>
+                <button className="btn-secondary" onClick={async ()=>{ if (!window.confirm('Delete DLQ item?')) return; try { await api.delete(`/admin/dlq/${m.id}`); pushToast(`Deleted #${m.id}`); loadDlq(); } catch { pushToast('Delete failed'); } }}>Delete</button>
+              </div>
+            </div>
+          ))}
+          {dlqItems.length===0 && !dlqLoading && (<div style={{ color:'#64748b' }}>No DLQ messages</div>)}
+        </div>
+      </Modal>
+
+      {/* Toasts */}
+      <Toasts items={toasts} onDismiss={dismissToast} />
+    </div>
+  );
+};
+
+export default App;
+
+
+
+
+
