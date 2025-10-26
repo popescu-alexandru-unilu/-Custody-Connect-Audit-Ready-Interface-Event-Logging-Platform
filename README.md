@@ -14,6 +14,7 @@ Programming (Java EE)	Core service built in Jakarta EE with JAX-RS, JPA, and CDI
 Test automation	Full test suite with JUnit 5, REST-assured, Mockito.
 Interface development	REST endpoints to send/receive custody events and status updates.
 IT requirements management	Functional/technical specs documented in Confluence or Markdown, with data field mapping and flow diagrams.
+
 🧱 System Overview
 
 Main Components
