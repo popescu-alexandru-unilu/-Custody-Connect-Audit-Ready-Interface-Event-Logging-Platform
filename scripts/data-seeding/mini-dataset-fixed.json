@@ -1,0 +1,52 @@
+[
+  {
+    "type": "CUSTODY_DEPOSIT_SETTLED",
+    "sourceSystem": "Euroclear",
+    "payload": "{\"accountId\":\"ACC-001\",\"asset\":\"ISIN:LU1234567890\",\"quantity\":1200.5,\"tradeDate\":\"2025-10-15T09:10:00Z\",\"settlementDate\":\"2025-10-17\",\"counterparty\":\"Euroclear\",\"txId\":\"TX-0001\"}"
+  },
+  {
+    "type": "WITHDRAWAL_REQUESTED",
+    "sourceSystem": "CustodyPlatform",
+    "payload": "{\"accountId\":\"ACC-002\",\"asset\":\"BTC\",\"quantity\":1.25,\"requestId\":\"REQ-92831\",\"requestedAt\":\"2025-10-18T08:21:00Z\",\"destination\":\"0xabc123...\"}"
+  },
+  {
+    "type": "WITHDRAWAL_FAILED",
+    "sourceSystem": "CustodyPlatform",
+    "payload": "{\"accountId\":\"ACC-002\",\"asset\":\"BTC\",\"quantity\":1.25,\"requestId\":\"REQ-92831\",\"failedAt\":\"2025-10-18T08:25:00Z\",\"reason\":\"Insufficient on-exchange balance\"}"
+  },
+  {
+    "type": "SETTLEMENT_INSTRUCTED",
+    "sourceSystem": "SettlementEngine",
+    "payload": "{\"accountId\":\"ACC-003\",\"asset\":\"ISIN:DE0008404005\",\"quantity\":300,\"instructionId\":\"INST-4001\",\"delivery\":\"DVP\",\"settlementDate\":\"2025-10-20\"}"
+  },
+  {
+    "type": "SETTLEMENT_CONFIRMED",
+    "sourceSystem": "Clearstream",
+    "payload": "{\"accountId\":\"ACC-003\",\"asset\":\"ISIN:DE0008404005\",\"quantity\":300,\"instructionId\":\"INST-4001\",\"confirmedAt\":\"2025-10-20T15:45:00Z\",\"placeOfSettlement\":\"Clearstream\"}"
+  },
+  {
+    "type": "CORPORATE_ACTION_DIVIDEND_POSTED",
+    "sourceSystem": "CorporateActions",
+    "payload": "{\"accountId\":\"ACC-004\",\"asset\":\"ISIN:US0378331005\",\"grossAmount\":245.80,\"netAmount\":180.50,\"currency\":\"USD\",\"exDate\":\"2025-09-30\",\"payDate\":\"2025-10-15\",\"caId\":\"CA-2025-001\"}"
+  },
+  {
+    "type": "KYC_STATUS_UPDATED",
+    "sourceSystem": "KYCService",
+    "payload": "{\"clientId\":\"CL-1001\",\"oldStatus\":\"PENDING\",\"newStatus\":\"APPROVED\",\"updatedAt\":\"2025-10-16T11:33:44Z\"}"
+  },
+  {
+    "type": "TRADE_ALLOCATION",
+    "sourceSystem": "TradingSystem",
+    "payload": "{\"blockId\":\"BLK-777\",\"allocations\":[{\"accountId\":\"ACC-005\",\"asset\":\"ETH\",\"quantity\":10.0},{\"accountId\":\"ACC-006\",\"asset\":\"ETH\",\"quantity\":15.0}],\"trader\":\"opsbot\",\"executedAt\":\"2025-10-17T13:05:00Z\"}"
+  },
+  {
+    "type": "LEDGER_ADJUSTMENT",
+    "sourceSystem": "LedgerService",
+    "payload": "{\"journalId\":\"JRN-9001\",\"accountId\":\"ACC-007\",\"asset\":\"USDC\",\"amount\":-5000,\"currency\":\"USD\",\"reason\":\"fee correction\",\"postedAt\":\"2025-10-18T10:00:00Z\"}"
+  },
+  {
+    "type": "EVIDENCE_ATTACHED",
+    "sourceSystem": "DocumentService",
+    "payload": "{\"eventRef\":\"TX-0001\",\"evidenceType\":\"PDF\",\"fileName\":\"deposit_receipt_TX-0001.pdf\",\"sha256\":\"f9b1...\",\"size\":48213,\"uploadedAt\":\"2025-10-18T09:00:00Z\"}"
+  }
+]

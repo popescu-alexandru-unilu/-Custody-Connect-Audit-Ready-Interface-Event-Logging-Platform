@@ -1,7 +1,10 @@
 lu\dekabank\custodyconnect\service\AuditService.class
+lu\dekabank\custodyconnect\dev\DevDataStore$DevEvent.class
 lu\dekabank\custodyconnect\controller\MetricsController.class
 lu\dekabank\custodyconnect\model\AuditLog.class
+lu\dekabank\custodyconnect\dev\DevDataStore$DevAudit.class
 lu\dekabank\custodyconnect\service\OutboxService.class
+lu\dekabank\custodyconnect\controller\HealthResource.class
 lu\dekabank\custodyconnect\service\RetentionService$RetentionResult.class
 lu\dekabank\custodyconnect\util\HashUtil.class
 lu\dekabank\custodyconnect\repository\EventRepository.class
@@ -23,6 +26,7 @@ lu\dekabank\custodyconnect\model\Event.class
 lu\dekabank\custodyconnect\util\DateTimeUtil.class
 lu\dekabank\custodyconnect\api\GenericExceptionMapper.class
 lu\dekabank\custodyconnect\controller\AuditController.class
+lu\dekabank\custodyconnect\dev\DevDataStore.class
 lu\dekabank\custodyconnect\model\OutboxEvent$Status.class
 lu\dekabank\custodyconnect\api\ValidationExceptionMapper.class
 lu\dekabank\custodyconnect\controller\DbAdminResource.class

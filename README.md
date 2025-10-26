@@ -4,11 +4,11 @@ Project Title: “Custody Connect” — Audit-Ready Interface & Event Logging P
 
 Develop a modular Java/Jakarta EE application that captures, reconciles, and audits custody events — such as securities transactions, fund movements, or depositary updates — between internal and external systems.
 
-The goal: create a robust, test-automated interface and event-logging solution that improves transparency, data quality, and regulatory audit readiness in DekaBank Luxembourg’s custody and depositary processes.
+The goal: create a robust, test-automated interface and event-logging solution that improves transparency, data quality, and regulatory audit readiness in banks.
 
-💡 Why It Fits DekaBank Luxembourg
-Internship Requirement	Project Match
-Support application owners/developers	You’ll extend and document real banking processes (custody & depositary) through a working prototype.
+
+ Requirement	Project 
+Support application owners/developers	I will extend and document real banking processes (custody & depositary) through a working prototype.
 Work in agile projects with own tasks	Each component (logging, reconciliation, REST API) can be delivered iteratively.
 Programming (Java EE)	Core service built in Jakarta EE with JAX-RS, JPA, and CDI.
 Test automation	Full test suite with JUnit 5, REST-assured, Mockito.
@@ -74,7 +74,7 @@ Hands-on exposure to test automation and DevOps workflows.
 Project Kickoff: “Custody Connect” – Audit-Ready Interface & Event Logging Platform
 
 Date: 10/17/2025
-Location: DekaBank Luxembourg – IT Department
+Location: Luxembourg – IT 
 Prepared by: Popescu Alexandru Bogdan
 
 
@@ -197,7 +197,7 @@ custody-connect/
 ├── 📂 src/
 │ ├── main/
 │ │ ├── java/
-│ │ │ └── lu/dekabank/custodyconnect/
+│ │ │ └── lu/bank/custodyconnect/
 │ │ │ ├── controller/ # REST controllers (JAX-RS)
 │ │ │ ├── model/ # JPA entities (Event, AuditLog, etc.)
 │ │ │ ├── repository/ # Data access layer (JPA repositories)
@@ -210,7 +210,7 @@ custody-connect/
 │ │
 │ └── test/
 │ ├── java/
-│ │ └── lu/dekabank/custodyconnect/
+│ │ └── lu/bank/custodyconnect/
 │ │ ├── controller/
 │ │ ├── service/
 │ │ └── repository/
