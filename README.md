@@ -4,7 +4,7 @@ Project Title: “Custody Connect” — Audit-Ready Interface & Event Logging P
 
 Develop a modular Java/Jakarta EE application that captures, reconciles, and audits custody events — such as securities transactions, fund movements, or depositary updates — between internal and external systems.
 
-The goal: create a robust, test-automated interface and event-logging solution that improves transparency, data quality, and regulatory audit readiness in banks.
+The goal: create a robust, test-automated interface and event-logging solution that improves transparency, data quality, and regulatory audit readiness in banks.no affiliation and no proprietary assets used.
 
 
  Requirement	Project 
